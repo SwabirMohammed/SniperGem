@@ -1,9 +1,9 @@
 // ═══════════════════════════════════════════════════════════════
-// Smart Trade System v4.0 (State-Machine Recalibration Edition)
-// Multi-Timeframe Trend Dashboard + Auto-Reset Execution Levels
+// Smart Trade System v4.1 (Historical Logging Edition)
+// Multi-Timeframe Trend Dashboard + Permanent Execution Records
 // ═══════════════════════════════════════════════════════════════
 //@version=6
-indicator("Sniper Trade Dashboard", overlay=true, max_lines_count=100, max_labels_count=200)
+indicator("Sniper Trade Dashboard", overlay=true, max_lines_count=500, max_labels_count=500)
 
 // ───────────────────────────────────────────────────────────────
 // INPUTS
@@ -104,7 +104,6 @@ sell_raw = ta.crossunder(ema_f, ema_s) and close < ema_t and rsi > rsi_os  and v
 buy_filtered  = buy_raw  and (not filter_htf or htf_trend_val == 1)
 sell_filtered = sell_raw and (not filter_htf or htf_trend_val == -1)
 
-// New signals can only unlock if no live trade is currently printing
 buy_signal  = buy_filtered  and last_dir != 1  and not trade_live
 sell_signal = sell_filtered and last_dir != -1 and not trade_live
 
@@ -168,7 +167,7 @@ if sell_signal
     label.new(bar_index, high + atr * 0.9, "Sell", yloc=yloc.price, style=label.style_label_down, color=#FF1493, textcolor=color.white, size=size.normal, textalign=text.align_center)
 
 // ───────────────────────────────────────────────────────────────
-// PERSISTENT DRAWING VARIABLES
+// EXECUTION LEVEL DRAWINGS (Persistent Instances)
 // ───────────────────────────────────────────────────────────────
 var line  l_sl   = na
 var line  l_en   = na
@@ -182,7 +181,7 @@ var label lb_tp2 = na
 var label lb_tp3 = na
 
 if (buy_signal or sell_signal) and show_levels
-    // Reset drawings when a brand new clean entry coordinates trigger
+    // FIXED: Removed line.delete and label.delete commands to preserve historical setups permanently
     l_sl  := line.new(bar_index, sl_px,    bar_index, sl_px,    color=#FF3333, width=2,  style=line.style_solid)
     l_en  := line.new(bar_index, entry_px, bar_index, entry_px, color=#AAAAAA, width=2,  style=line.style_dashed)
     l_tp1 := line.new(bar_index, tp1_px,   bar_index, tp1_px,   color=#00C853, width=1,  style=line.style_solid)
