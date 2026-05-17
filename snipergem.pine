@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-// Smart Trade System v4.2 (Session Command Edition)
+// Smart Trade System v4.3 (Session Command Edition — Fixed)
 // Multi-Timeframe Trend Dashboard + Permanent Execution Records
 // ═══════════════════════════════════════════════════════════════
 //@version=6
@@ -45,7 +45,7 @@ ema_s = ta.ema(close, ema_slow_len)
 ema_t = ta.ema(close, ema_trend_len)
 rsi   = ta.rsi(close, rsi_len)
 atr   = ta.atr(atr_len)
-vol_ma = ta.sma(volume, 20)
+volume_ma = ta.sma(volume, 20)
 
 // Swing structure
 ph = ta.pivothigh(high, swing_lb, swing_lb)
@@ -60,7 +60,7 @@ if not na(pl)
 
 bull_trend = ema_f > ema_s and ema_s > ema_t and close > ema_t
 bear_trend = ema_f < ema_s and ema_s < ema_t and close < ema_t
-vol_ok = not vol_filter or volume > vol_ma
+vol_ok = not vol_filter or volume > volume_ma
 
 // ───────────────────────────────────────────────────────────────
 // MULTI-TIMEFRAME TREND FUNCTIONS
@@ -240,6 +240,13 @@ else
 // ───────────────────────────────────────────────────────────────
 // COMMAND CENTER DASHBOARD TABLE (Expanded Matrix)
 // ───────────────────────────────────────────────────────────────
+// FIXED: Restored definitions for table styling functions
+f_tc(v) =>
+    v == 1 ? color.new(#00C853, 10) : v == -1 ? color.new(#FF1744, 10) : color.new(#555555, 10)
+
+f_tt(v) =>
+    v == 1 ? "Bullish" : v == -1 ? "Bearish" : "Neutral"
+
 cur_trend_val = bull_trend ? 1 : bear_trend ? -1 : 0
 pos_text      = trade_dir ==  1 ? "Buy"  : trade_dir == -1 ? "Sell" : "None"
 pos_color     = trade_dir ==  1 ? color.new(#00C853, 10) : trade_dir == -1 ? color.new(#FF1744, 10) : color.new(#555555, 10)
@@ -250,7 +257,6 @@ tbl_position = switch tbl_pos
     "Top Right"    => position.top_right
     => position.top_left
 
-// Matrix increased to 14 rows to fit the new session fields on top
 var table tbl = table.new(tbl_position, 2, 14, border_color=color.new(#444444, 20), border_width=1, frame_color=color.new(#222222, 0), frame_width=2)
 HDR_BG = color.new(#1A1A2E, 10)
 ROW_BG = color.new(#111122, 20)
