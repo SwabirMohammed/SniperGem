@@ -1,9 +1,9 @@
 // ═══════════════════════════════════════════════════════════════
-// Smart Trade System v3.4
-// Multi-Timeframe Trend Dashboard + Fixed Pinned Line Levels (60 Bars)
+// Smart Trade System v4.0 (State-Machine Recalibration Edition)
+// Multi-Timeframe Trend Dashboard + Auto-Reset Execution Levels
 // ═══════════════════════════════════════════════════════════════
 //@version=6
-indicator("Sniper Trade Dashboard", overlay=true, max_lines_count=50, max_labels_count=200)
+indicator("Sniper Trade Dashboard", overlay=true, max_lines_count=100, max_labels_count=200)
 
 // ───────────────────────────────────────────────────────────────
 // INPUTS
@@ -33,7 +33,7 @@ grp_disp = "══ Display ══"
 show_emas   = input.bool(false, "Show EMAs",              group=grp_disp)
 show_table  = input.bool(true,  "Show MTF Dashboard",     group=grp_disp)
 show_levels = input.bool(true,  "Show SL / TP Levels",    group=grp_disp)
-line_length = input.int(60,     "Line Length (Bars)",     group=grp_disp, minval=5, maxval=500) // Changed default extension to 60 bars
+line_length = input.int(60,     "Max Line Length (Bars)", group=grp_disp, minval=5, maxval=500)
 tbl_pos     = input.string("Bottom Right", "Table Position",
                options=["Bottom Right","Bottom Left","Top Right","Top Left"], group=grp_disp)
 
@@ -51,7 +51,6 @@ vol_ma = ta.sma(volume, 20)
 ph = ta.pivothigh(high, swing_lb, swing_lb)
 pl = ta.pivotlow(low,   swing_lb, swing_lb)
 
-// Track most recent swing levels
 var float last_swing_high = na
 var float last_swing_low  = na
 if not na(ph)
@@ -59,11 +58,8 @@ if not na(ph)
 if not na(pl)
     last_swing_low  := pl
 
-// Trend conditions
 bull_trend = ema_f > ema_s and ema_s > ema_t and close > ema_t
 bear_trend = ema_f < ema_s and ema_s < ema_t and close < ema_t
-
-// Volume confirmation
 vol_ok = not vol_filter or volume > vol_ma
 
 // ───────────────────────────────────────────────────────────────
@@ -95,25 +91,36 @@ t_1d  = mtf_dir("1D")
 htf_trend_val = mtf_dir(filter_tf)
 
 // ───────────────────────────────────────────────────────────────
-// SIGNAL LOGIC
+// STATE-MACHINE ENGINE & SIGNAL FILTERING
 // ───────────────────────────────────────────────────────────────
+var int  last_dir    = 0
+var bool trade_live  = false
+var int  trade_type  = 0
+var int  start_index = 0
+
 buy_raw  = ta.crossover(ema_f, ema_s)  and close > ema_t and rsi < rsi_ob and vol_ok
 sell_raw = ta.crossunder(ema_f, ema_s) and close < ema_t and rsi > rsi_os  and vol_ok
 
 buy_filtered  = buy_raw  and (not filter_htf or htf_trend_val == 1)
 sell_filtered = sell_raw and (not filter_htf or htf_trend_val == -1)
 
-var int last_dir = 0
-buy_signal  = buy_filtered  and last_dir != 1
-sell_signal = sell_filtered and last_dir != -1
+// New signals can only unlock if no live trade is currently printing
+buy_signal  = buy_filtered  and last_dir != 1  and not trade_live
+sell_signal = sell_filtered and last_dir != -1 and not trade_live
 
 if buy_signal
-    last_dir := 1
+    last_dir    := 1
+    trade_live  := true
+    trade_type  := 1
+    start_index := bar_index
 if sell_signal
-    last_dir := -1
+    last_dir    := -1
+    trade_live  := true
+    trade_type  := -1
+    start_index := bar_index
 
 // ───────────────────────────────────────────────────────────────
-// TRADE LEVEL CALCULATION
+// LEVEL CALCULATIONS
 // ───────────────────────────────────────────────────────────────
 var float entry_px = na
 var float sl_px    = na
@@ -145,39 +152,23 @@ if sell_signal
     trade_dir := -1
 
 // ───────────────────────────────────────────────────────────────
-// PLOTS & HIDDEN SCALE LOCK
+// PLOTS
 // ───────────────────────────────────────────────────────────────
 plot(show_emas ? ema_f : na, "Fast EMA",  color=color.new(#00BFFF, 30), linewidth=1)
 plot(show_emas ? ema_s : na, "Slow EMA",  color=color.new(#FFA500, 30), linewidth=1)
 plot(show_emas ? ema_t : na, "Trend EMA", color=color.new(#CC44FF, 20), linewidth=2)
 
-plot(close, "Scale Anchor", color=color.new(color.blue, 100))
-
 // ───────────────────────────────────────────────────────────────
-// BUY / SELL LABELS
+// SIGNAL SIGNPOST LABELS
 // ───────────────────────────────────────────────────────────────
 if buy_signal
-    label.new(bar_index, low - atr * 0.9,
-              "Buy+",
-              yloc       = yloc.price,
-              style      = label.style_label_up,
-              color      = #00E5FF,
-              textcolor  = color.black,
-              size       = size.normal,
-              textalign  = text.align_center)
+    label.new(bar_index, low - atr * 0.9, "Buy+", yloc=yloc.price, style=label.style_label_up, color=#00E5FF, textcolor=color.black, size=size.normal, textalign=text.align_center)
 
 if sell_signal
-    label.new(bar_index, high + atr * 0.9,
-              "Sell",
-              yloc       = yloc.price,
-              style      = label.style_label_down,
-              color      = #FF1493,
-              textcolor  = color.white,
-              size       = size.normal,
-              textalign  = text.align_center)
+    label.new(bar_index, high + atr * 0.9, "Sell", yloc=yloc.price, style=label.style_label_down, color=#FF1493, textcolor=color.white, size=size.normal, textalign=text.align_center)
 
 // ───────────────────────────────────────────────────────────────
-// TRADE LEVEL DRAWINGS (Clean Bounded Static Lines)
+// PERSISTENT DRAWING VARIABLES
 // ───────────────────────────────────────────────────────────────
 var line  l_sl   = na
 var line  l_en   = na
@@ -191,24 +182,46 @@ var label lb_tp2 = na
 var label lb_tp3 = na
 
 if (buy_signal or sell_signal) and show_levels
-    // Clear old instances completely
-    line.delete(l_sl), line.delete(l_en), line.delete(l_tp1), line.delete(l_tp2), line.delete(l_tp3)
-    label.delete(lb_sl), label.delete(lb_en), label.delete(lb_tp1), label.delete(lb_tp2), label.delete(lb_tp3)
+    // Reset drawings when a brand new clean entry coordinates trigger
+    l_sl  := line.new(bar_index, sl_px,    bar_index, sl_px,    color=#FF3333, width=2,  style=line.style_solid)
+    l_en  := line.new(bar_index, entry_px, bar_index, entry_px, color=#AAAAAA, width=2,  style=line.style_dashed)
+    l_tp1 := line.new(bar_index, tp1_px,   bar_index, tp1_px,   color=#00C853, width=1,  style=line.style_solid)
+    l_tp2 := line.new(bar_index, tp2_px,   bar_index, tp2_px,   color=#00C853, width=1,  style=line.style_solid)
+    l_tp3 := line.new(bar_index, tp3_px,   bar_index, tp3_px,   color=#00C853, width=1,  style=line.style_solid)
 
-    int target_bar = bar_index + line_length
+    lb_sl  := label.new(bar_index, sl_px,    "SL ("    + str.tostring(sl_px,    format.mintick) + ")", style=label.style_label_left, color=#FF3333, textcolor=color.white, size=size.small)
+    lb_en  := label.new(bar_index, entry_px, "Entry (" + str.tostring(entry_px, format.mintick) + ")", style=label.style_label_left, color=#555555, textcolor=color.white, size=size.small)
+    lb_tp1 := label.new(bar_index, tp1_px,   "TP1 ("   + str.tostring(tp1_px,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
+    lb_tp2 := label.new(bar_index, tp2_px,   "TP2 ("   + str.tostring(tp2_px,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
+    lb_tp3 := label.new(bar_index, tp3_px,   "TP3 ("   + str.tostring(tp3_px,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
 
-    l_sl  := line.new(bar_index, sl_px,    target_bar, sl_px,    color=#FF3333, width=2,  style=line.style_solid)
-    l_en  := line.new(bar_index, entry_px, target_bar, entry_px, color=#AAAAAA, width=2,  style=line.style_dashed)
-    l_tp1 := line.new(bar_index, tp1_px,   target_bar, tp1_px,   color=#00C853, width=1,  style=line.style_solid)
-    l_tp2 := line.new(bar_index, tp2_px,   target_bar, tp2_px,   color=#00C853, width=1,  style=line.style_solid)
-    l_tp3 := line.new(bar_index, tp3_px,   target_bar, tp3_px,   color=#00C853, width=1,  style=line.style_solid)
+// ───────────────────────────────────────────────────────────────
+// DYNAMIC tracking & RECALIBRATION LOOP
+// ───────────────────────────────────────────────────────────────
+if trade_live and show_levels and not na(l_sl)
+    // Stretch tracking lines forward bar-by-bar to match live price action
+    line.set_x2(l_sl, bar_index)
+    line.set_x2(l_en, bar_index)
+    line.set_x2(l_tp1, bar_index)
+    line.set_x2(l_tp2, bar_index)
+    line.set_x2(l_tp3, bar_index)
+    
+    // Shift axis text labels to float nicely on the forward edge
+    label.set_x(lb_sl, bar_index + 2)
+    label.set_x(lb_en, bar_index + 2)
+    label.set_x(lb_tp1, bar_index + 2)
+    label.set_x(lb_tp2, bar_index + 2)
+    label.set_x(lb_tp3, bar_index + 2)
+    
+    // Evaluate real-time exit boundaries
+    bool sl_breached   = (trade_type == 1 and low <= sl_px) or (trade_type == -1 and high >= sl_px)
+    bool max_time_out  = (bar_index - start_index) >= line_length
+    bool target_capped = (trade_type == 1 and high >= tp3_px) or (trade_type == -1 and low <= tp3_px)
 
-    // Text label strings sit right next to the right-most bounding edge
-    lb_sl  := label.new(target_bar + 1, sl_px,    "SL ("    + str.tostring(sl_px,    format.mintick) + ")", style=label.style_label_left, color=#FF3333, textcolor=color.white, size=size.small)
-    lb_en  := label.new(target_bar + 1, entry_px, "Entry (" + str.tostring(entry_px, format.mintick) + ")", style=label.style_label_left, color=#555555, textcolor=color.white, size=size.small)
-    lb_tp1 := label.new(target_bar + 1, tp1_px,   "TP1 ("   + str.tostring(tp1_px,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
-    lb_tp2 := label.new(target_bar + 1, tp2_px,   "TP2 ("   + str.tostring(tp2_px,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
-    lb_tp3 := label.new(target_bar + 1, tp3_px,   "TP3 ("   + str.tostring(tp3_px,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
+    // RECALIBRATION TRIGGER: If price hits SL, TP3, or clocks out, freeze setup and unlock script memory
+    if sl_breached or target_capped or max_time_out
+        trade_live := false
+        last_dir   := 0 
 
 // ───────────────────────────────────────────────────────────────
 // DASHBOARD TABLE — Multi-Timeframe Trend
@@ -229,55 +242,38 @@ tbl_position = switch tbl_pos
     "Top Right"    => position.top_right
     => position.top_left
 
-var table tbl = table.new(tbl_position, 2, 12,
-                           border_color = color.new(#444444, 20),
-                           border_width = 1,
-                           frame_color  = color.new(#222222, 0),
-                           frame_width  = 2)
-
+var table tbl = table.new(tbl_position, 2, 12, border_color=color.new(#444444, 20), border_width=1, frame_color=color.new(#222222, 0), frame_width=2)
 HDR_BG = color.new(#1A1A2E, 10)
 ROW_BG = color.new(#111122, 20)
 
 if show_table
     table.cell(tbl, 0, 0,  "Current Position", bgcolor=HDR_BG, text_color=#CCCCCC, text_size=size.small, text_halign=text.align_left)
     table.cell(tbl, 1, 0,  pos_text, bgcolor=pos_color, text_color=color.white, text_size=size.small, text_halign=text.align_center)
-
     table.cell(tbl, 0, 1,  "Current Trend", bgcolor=HDR_BG, text_color=#CCCCCC, text_size=size.small, text_halign=text.align_left)
     table.cell(tbl, 1, 1,  f_tt(cur_trend_val), bgcolor=f_tc(cur_trend_val), text_color=color.white, text_size=size.small, text_halign=text.align_center)
-
     table.cell(tbl, 0, 2,  "1 min",  bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
     table.cell(tbl, 1, 2,  f_tt(t_1m),  bgcolor=f_tc(t_1m),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
-
     table.cell(tbl, 0, 3,  "3 min",  bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
     table.cell(tbl, 1, 3,  f_tt(t_3m),  bgcolor=f_tc(t_3m),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
-
     table.cell(tbl, 0, 4,  "5 min",  bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
     table.cell(tbl, 1, 4,  f_tt(t_5m),  bgcolor=f_tc(t_5m),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
-
     table.cell(tbl, 0, 5,  "15 min", bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
     table.cell(tbl, 1, 5,  f_tt(t_15m), bgcolor=f_tc(t_15m), text_color=color.white, text_size=size.small, text_halign=text.align_center)
-
     table.cell(tbl, 0, 6,  "30 min", bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
     table.cell(tbl, 1, 6,  f_tt(t_30m), bgcolor=f_tc(t_30m), text_color=color.white, text_size=size.small, text_halign=text.align_center)
-
     table.cell(tbl, 0, 7,  "1H",     bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
     table.cell(tbl, 1, 7,  f_tt(t_1h),  bgcolor=f_tc(t_1h),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
-
     table.cell(tbl, 0, 8,  "2H",     bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
     table.cell(tbl, 1, 8,  f_tt(t_2h),  bgcolor=f_tc(t_2h),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
-
     table.cell(tbl, 0, 9,  "4H",     bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
     table.cell(tbl, 1, 9,  f_tt(t_4h),  bgcolor=f_tc(t_4h),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
-
     table.cell(tbl, 0, 10, "8H",     bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
     table.cell(tbl, 1, 10, f_tt(t_8h),  bgcolor=f_tc(t_8h),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
-
     table.cell(tbl, 0, 11, "Daily",  bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
     table.cell(tbl, 1, 11, f_tt(t_1d),  bgcolor=f_tc(t_1d),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
 
 // ───────────────────────────────────────────────────────────────
 // ALERTS
 // ───────────────────────────────────────────────────────────────
-alertcondition(buy_signal,  title="🟢 BUY Signal",  message="STS: BUY+ on {{ticker}} ({{interval}}) @ {{close}} | SL below swing low")
-alertcondition(sell_signal, title="🔴 SELL Signal", message="STS: SELL on {{ticker}} ({{interval}}) @ {{close}} | SL above swing high")
-alertcondition(buy_signal or sell_signal, title="⚡ Any Signal", message="STS Signal on {{ticker}} @ {{close}}")
+alertcondition(buy_signal,  title="🟢 BUY Signal",  message="STS: BUY+ on {{ticker}} ({{interval}}) @ {{close}}")
+alertcondition(sell_signal, title="🔴 SELL Signal", message="STS: SELL on {{ticker}} ({{interval}}) @ {{close}}")
