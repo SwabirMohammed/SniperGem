@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
-// Smart Trade System v3.1
-// Multi-Timeframe Trend Dashboard + Scale-Locked Plot Levels
+// Smart Trade System v3.2
+// Multi-Timeframe Trend Dashboard + Clean Execution Levels
 // ═══════════════════════════════════════════════════════════════
 //@version=6
 indicator("Sniper Trade Dashboard", overlay=true, max_lines_count=50, max_labels_count=200)
@@ -112,77 +112,99 @@ if sell_signal
     last_dir := -1
 
 // ───────────────────────────────────────────────────────────────
-// TRADE LEVEL CALCULATION & PERSISTENCE STORAGE
+// TRADE LEVEL CALCULATION
 // ───────────────────────────────────────────────────────────────
-var float active_entry = na
-var float active_sl    = na
-var float active_tp1   = na
-var float active_tp2   = na
-var float active_tp3   = na
+var float entry_px = na
+var float sl_px    = na
+var float tp1_px   = na
+var float tp2_px   = na
+var float tp3_px   = na
 var int   trade_dir = 0
 
 if buy_signal
-    active_entry := close
-    atr_sl       = close - atr * sl_mult
-    swing_sl     = not na(last_swing_low) ? last_swing_low - atr * 0.3 : atr_sl
-    active_sl    := use_swing ? math.min(atr_sl, swing_sl) : atr_sl
-    float risk   = active_entry - active_sl
-    active_tp1   := active_entry + risk * tp1_rr
-    active_tp2   := active_entry + risk * tp2_rr
-    active_tp3   := active_entry + risk * tp3_rr
-    trade_dir    := 1
+    entry_px  := close
+    atr_sl    = close - atr * sl_mult
+    swing_sl  = not na(last_swing_low) ? last_swing_low - atr * 0.3 : atr_sl
+    sl_px     := use_swing ? math.min(atr_sl, swing_sl) : atr_sl
+    float risk = entry_px - sl_px
+    tp1_px    := entry_px + risk * tp1_rr
+    tp2_px    := entry_px + risk * tp2_rr
+    tp3_px    := entry_px + risk * tp3_rr
+    trade_dir := 1
 
 if sell_signal
-    active_entry := close
-    atr_sl       = close + atr * sl_mult
-    swing_sl     = not na(last_swing_high) ? last_swing_high + atr * 0.3 : atr_sl
-    active_sl    := use_swing ? math.max(atr_sl, swing_sl) : atr_sl
-    float risk   = active_sl - active_entry
-    active_tp1   := active_entry - risk * tp1_rr
-    active_tp2   := active_entry - risk * tp2_rr
-    active_tp3   := active_entry - risk * tp3_rr
-    trade_dir    := -1
+    entry_px  := close
+    atr_sl    = close + atr * sl_mult
+    swing_sl  = not na(last_swing_high) ? last_swing_high + atr * 0.3 : atr_sl
+    sl_px     := use_swing ? math.max(atr_sl, swing_sl) : atr_sl
+    float risk = sl_px - entry_px
+    tp1_px    := entry_px - risk * tp1_rr
+    tp2_px    := entry_px - risk * tp2_rr
+    tp3_px    := entry_px - risk * tp3_rr
+    trade_dir := -1
 
 // ───────────────────────────────────────────────────────────────
-// NATIVE SCALE PLOTS (Glued to Candlesticks)
+// PLOTS
 // ───────────────────────────────────────────────────────────────
 plot(show_emas ? ema_f : na, "Fast EMA",  color=color.new(#00BFFF, 30), linewidth=1)
 plot(show_emas ? ema_s : na, "Slow EMA",  color=color.new(#FFA500, 30), linewidth=1)
 plot(show_emas ? ema_t : na, "Trend EMA", color=color.new(#CC44FF, 20), linewidth=2)
 
-// Fixed: Changed style from plot.style_dashed to plot.style_line
-plot(show_levels ? active_entry : na, "Entry Level", color=color.new(#AAAAAA, 10), style=plot.style_line, linewidth=2)
-plot(show_levels ? active_sl : na,    "Stop Loss",   color=color.new(#FF3333, 0),  style=plot.style_line, linewidth=2)
-plot(show_levels ? active_tp1 : na,   "Take Profit 1", color=color.new(#00C853, 0),  style=plot.style_line, linewidth=1)
-plot(show_levels ? active_tp2 : na,   "Take Profit 2", color=color.new(#00C853, 0),  style=plot.style_line, linewidth=1)
-plot(show_levels ? active_tp3 : na,   "Take Profit 3", color=color.new(#00C853, 0),  style=plot.style_line, linewidth=1)
-
 // ───────────────────────────────────────────────────────────────
-// BUY / SELL CANDLE LABELS
+// BUY / SELL LABELS
 // ───────────────────────────────────────────────────────────────
 if buy_signal
-    label.new(bar_index, low - atr * 0.9, "Buy+", yloc=yloc.price, style=label.style_label_up, color=#00E5FF, textcolor=color.black, size=size.normal, textalign=text.align_center)
+    label.new(bar_index, low - atr * 0.9,
+              "Buy+",
+              yloc       = yloc.price,
+              style      = label.style_label_up,
+              color      = #00E5FF,
+              textcolor  = color.black,
+              size       = size.normal,
+              textalign  = text.align_center)
 
 if sell_signal
-    label.new(bar_index, high + atr * 0.9, "Sell", yloc=yloc.price, style=label.style_label_down, color=#FF1493, textcolor=color.white, size=size.normal, textalign=text.align_center)
+    label.new(bar_index, high + atr * 0.9,
+              "Sell",
+              yloc       = yloc.price,
+              style      = label.style_label_down,
+              color      = #FF1493,
+              textcolor  = color.white,
+              size       = size.normal,
+              textalign  = text.align_center)
 
 // ───────────────────────────────────────────────────────────────
-// DYNAMIC FOREGROUND AXIS TEXT LABELS
+// TRADE LEVEL DRAWINGS
 // ───────────────────────────────────────────────────────────────
-var label lb_en  = na
+var line  l_sl   = na
+var line  l_en   = na
+var line  l_tp1  = na
+var line  l_tp2  = na
+var line  l_tp3  = na
 var label lb_sl  = na
+var label lb_en  = na
 var label lb_tp1 = na
 var label lb_tp2 = na
 var label lb_tp3 = na
 
-if barstate.islast and show_levels and not na(active_entry)
-    label.delete(lb_en), label.delete(lb_sl), label.delete(lb_tp1), label.delete(lb_tp2), label.delete(lb_tp3)
-    
-    lb_en  := label.new(bar_index + 3, active_entry, "Entry (" + str.tostring(active_entry, format.mintick) + ")", style=label.style_label_left, color=#555555, textcolor=color.white, size=size.small)
-    lb_sl  := label.new(bar_index + 3, active_sl,    "SL ("    + str.tostring(active_sl,    format.mintick) + ")", style=label.style_label_left, color=#FF3333, textcolor=color.white, size=size.small)
-    lb_tp1 := label.new(bar_index + 3, active_tp1,   "TP1 ("   + str.tostring(active_tp1,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
-    lb_tp2 := label.new(bar_index + 3, active_tp2,   "TP2 ("   + str.tostring(active_tp2,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
-    lb_tp3 := label.new(bar_index + 3, active_tp3,   "TP3 ("   + str.tostring(active_tp3,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
+if (buy_signal or sell_signal) and show_levels
+    // Clear old instances completely
+    line.delete(l_sl), line.delete(l_en), line.delete(l_tp1), line.delete(l_tp2), line.delete(l_tp3)
+    label.delete(lb_sl), label.delete(lb_en), label.delete(lb_tp1), label.delete(lb_tp2), label.delete(lb_tp3)
+
+    // Lines originate at the signal bar and extend cleanly to the right price axis natively
+    l_sl  := line.new(bar_index, sl_px,    bar_index + 1, sl_px,    extend=extend.right, color=#FF3333, width=2,  style=line.style_solid)
+    l_en  := line.new(bar_index, entry_px, bar_index + 1, entry_px, extend=extend.right, color=#AAAAAA, width=2,  style=line.style_dashed)
+    l_tp1 := line.new(bar_index, tp1_px,   bar_index + 1, tp1_px,   extend=extend.right, color=#00C853, width=1,  style=line.style_solid)
+    l_tp2 := line.new(bar_index, tp2_px,   bar_index + 1, tp2_px,   extend=extend.right, color=#00C853, width=1,  style=line.style_solid)
+    l_tp3 := line.new(bar_index, tp3_px,   bar_index + 1, tp3_px,   extend=extend.right, color=#00C853, width=1,  style=line.style_solid)
+
+    // Right-side labels pinned neatly 
+    lb_sl  := label.new(bar_index + 5, sl_px,    "SL ("    + str.tostring(sl_px,    format.mintick) + ")", style=label.style_label_left, color=#FF3333, textcolor=color.white, size=size.small)
+    lb_en  := label.new(bar_index + 5, entry_px, "Entry (" + str.tostring(entry_px, format.mintick) + ")", style=label.style_label_left, color=#555555, textcolor=color.white, size=size.small)
+    lb_tp1 := label.new(bar_index + 5, tp1_px,   "TP1 ("   + str.tostring(tp1_px,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
+    lb_tp2 := label.new(bar_index + 5, tp2_px,   "TP2 ("   + str.tostring(tp2_px,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
+    lb_tp3 := label.new(bar_index + 5, tp3_px,   "TP3 ("   + str.tostring(tp3_px,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
 
 // ───────────────────────────────────────────────────────────────
 // DASHBOARD TABLE — Multi-Timeframe Trend
