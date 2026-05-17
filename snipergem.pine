@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
-// Smart Trade System v3.2
-// Multi-Timeframe Trend Dashboard + Clean Execution Levels
+// Smart Trade System v3.4
+// Multi-Timeframe Trend Dashboard + Fixed Pinned Line Levels (60 Bars)
 // ═══════════════════════════════════════════════════════════════
 //@version=6
 indicator("Sniper Trade Dashboard", overlay=true, max_lines_count=50, max_labels_count=200)
@@ -33,6 +33,7 @@ grp_disp = "══ Display ══"
 show_emas   = input.bool(false, "Show EMAs",              group=grp_disp)
 show_table  = input.bool(true,  "Show MTF Dashboard",     group=grp_disp)
 show_levels = input.bool(true,  "Show SL / TP Levels",    group=grp_disp)
+line_length = input.int(60,     "Line Length (Bars)",     group=grp_disp, minval=5, maxval=500) // Changed default extension to 60 bars
 tbl_pos     = input.string("Bottom Right", "Table Position",
                options=["Bottom Right","Bottom Left","Top Right","Top Left"], group=grp_disp)
 
@@ -144,11 +145,13 @@ if sell_signal
     trade_dir := -1
 
 // ───────────────────────────────────────────────────────────────
-// PLOTS
+// PLOTS & HIDDEN SCALE LOCK
 // ───────────────────────────────────────────────────────────────
 plot(show_emas ? ema_f : na, "Fast EMA",  color=color.new(#00BFFF, 30), linewidth=1)
 plot(show_emas ? ema_s : na, "Slow EMA",  color=color.new(#FFA500, 30), linewidth=1)
 plot(show_emas ? ema_t : na, "Trend EMA", color=color.new(#CC44FF, 20), linewidth=2)
+
+plot(close, "Scale Anchor", color=color.new(color.blue, 100))
 
 // ───────────────────────────────────────────────────────────────
 // BUY / SELL LABELS
@@ -174,7 +177,7 @@ if sell_signal
               textalign  = text.align_center)
 
 // ───────────────────────────────────────────────────────────────
-// TRADE LEVEL DRAWINGS
+// TRADE LEVEL DRAWINGS (Clean Bounded Static Lines)
 // ───────────────────────────────────────────────────────────────
 var line  l_sl   = na
 var line  l_en   = na
@@ -192,19 +195,20 @@ if (buy_signal or sell_signal) and show_levels
     line.delete(l_sl), line.delete(l_en), line.delete(l_tp1), line.delete(l_tp2), line.delete(l_tp3)
     label.delete(lb_sl), label.delete(lb_en), label.delete(lb_tp1), label.delete(lb_tp2), label.delete(lb_tp3)
 
-    // Lines originate at the signal bar and extend cleanly to the right price axis natively
-    l_sl  := line.new(bar_index, sl_px,    bar_index + 1, sl_px,    extend=extend.right, color=#FF3333, width=2,  style=line.style_solid)
-    l_en  := line.new(bar_index, entry_px, bar_index + 1, entry_px, extend=extend.right, color=#AAAAAA, width=2,  style=line.style_dashed)
-    l_tp1 := line.new(bar_index, tp1_px,   bar_index + 1, tp1_px,   extend=extend.right, color=#00C853, width=1,  style=line.style_solid)
-    l_tp2 := line.new(bar_index, tp2_px,   bar_index + 1, tp2_px,   extend=extend.right, color=#00C853, width=1,  style=line.style_solid)
-    l_tp3 := line.new(bar_index, tp3_px,   bar_index + 1, tp3_px,   extend=extend.right, color=#00C853, width=1,  style=line.style_solid)
+    int target_bar = bar_index + line_length
 
-    // Right-side labels pinned neatly 
-    lb_sl  := label.new(bar_index + 5, sl_px,    "SL ("    + str.tostring(sl_px,    format.mintick) + ")", style=label.style_label_left, color=#FF3333, textcolor=color.white, size=size.small)
-    lb_en  := label.new(bar_index + 5, entry_px, "Entry (" + str.tostring(entry_px, format.mintick) + ")", style=label.style_label_left, color=#555555, textcolor=color.white, size=size.small)
-    lb_tp1 := label.new(bar_index + 5, tp1_px,   "TP1 ("   + str.tostring(tp1_px,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
-    lb_tp2 := label.new(bar_index + 5, tp2_px,   "TP2 ("   + str.tostring(tp2_px,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
-    lb_tp3 := label.new(bar_index + 5, tp3_px,   "TP3 ("   + str.tostring(tp3_px,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
+    l_sl  := line.new(bar_index, sl_px,    target_bar, sl_px,    color=#FF3333, width=2,  style=line.style_solid)
+    l_en  := line.new(bar_index, entry_px, target_bar, entry_px, color=#AAAAAA, width=2,  style=line.style_dashed)
+    l_tp1 := line.new(bar_index, tp1_px,   target_bar, tp1_px,   color=#00C853, width=1,  style=line.style_solid)
+    l_tp2 := line.new(bar_index, tp2_px,   target_bar, tp2_px,   color=#00C853, width=1,  style=line.style_solid)
+    l_tp3 := line.new(bar_index, tp3_px,   target_bar, tp3_px,   color=#00C853, width=1,  style=line.style_solid)
+
+    // Text label strings sit right next to the right-most bounding edge
+    lb_sl  := label.new(target_bar + 1, sl_px,    "SL ("    + str.tostring(sl_px,    format.mintick) + ")", style=label.style_label_left, color=#FF3333, textcolor=color.white, size=size.small)
+    lb_en  := label.new(target_bar + 1, entry_px, "Entry (" + str.tostring(entry_px, format.mintick) + ")", style=label.style_label_left, color=#555555, textcolor=color.white, size=size.small)
+    lb_tp1 := label.new(target_bar + 1, tp1_px,   "TP1 ("   + str.tostring(tp1_px,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
+    lb_tp2 := label.new(target_bar + 1, tp2_px,   "TP2 ("   + str.tostring(tp2_px,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
+    lb_tp3 := label.new(target_bar + 1, tp3_px,   "TP3 ("   + str.tostring(tp3_px,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
 
 // ───────────────────────────────────────────────────────────────
 // DASHBOARD TABLE — Multi-Timeframe Trend
