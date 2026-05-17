@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-// Smart Trade System v4.1 (Historical Logging Edition)
+// Smart Trade System v4.2 (Session Command Edition)
 // Multi-Timeframe Trend Dashboard + Permanent Execution Records
 // ═══════════════════════════════════════════════════════════════
 //@version=6
@@ -181,7 +181,6 @@ var label lb_tp2 = na
 var label lb_tp3 = na
 
 if (buy_signal or sell_signal) and show_levels
-    // FIXED: Removed line.delete and label.delete commands to preserve historical setups permanently
     l_sl  := line.new(bar_index, sl_px,    bar_index, sl_px,    color=#FF3333, width=2,  style=line.style_solid)
     l_en  := line.new(bar_index, entry_px, bar_index, entry_px, color=#AAAAAA, width=2,  style=line.style_dashed)
     l_tp1 := line.new(bar_index, tp1_px,   bar_index, tp1_px,   color=#00C853, width=1,  style=line.style_solid)
@@ -195,42 +194,52 @@ if (buy_signal or sell_signal) and show_levels
     lb_tp3 := label.new(bar_index, tp3_px,   "TP3 ("   + str.tostring(tp3_px,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
 
 // ───────────────────────────────────────────────────────────────
-// DYNAMIC tracking & RECALIBRATION LOOP
+// DYNAMIC TRACKING & RECALIBRATION LOOP
 // ───────────────────────────────────────────────────────────────
 if trade_live and show_levels and not na(l_sl)
-    // Stretch tracking lines forward bar-by-bar to match live price action
     line.set_x2(l_sl, bar_index)
     line.set_x2(l_en, bar_index)
     line.set_x2(l_tp1, bar_index)
     line.set_x2(l_tp2, bar_index)
     line.set_x2(l_tp3, bar_index)
     
-    // Shift axis text labels to float nicely on the forward edge
     label.set_x(lb_sl, bar_index + 2)
     label.set_x(lb_en, bar_index + 2)
     label.set_x(lb_tp1, bar_index + 2)
     label.set_x(lb_tp2, bar_index + 2)
     label.set_x(lb_tp3, bar_index + 2)
     
-    // Evaluate real-time exit boundaries
     bool sl_breached   = (trade_type == 1 and low <= sl_px) or (trade_type == -1 and high >= sl_px)
     bool max_time_out  = (bar_index - start_index) >= line_length
     bool target_capped = (trade_type == 1 and high >= tp3_px) or (trade_type == -1 and low <= tp3_px)
 
-    // RECALIBRATION TRIGGER: If price hits SL, TP3, or clocks out, freeze setup and unlock script memory
     if sl_breached or target_capped or max_time_out
         trade_live := false
         last_dir   := 0 
 
 // ───────────────────────────────────────────────────────────────
-// DASHBOARD TABLE — Multi-Timeframe Trend
+// LIVE SESSION DETECTION ENGINE (UTC+3 Normalized)
 // ───────────────────────────────────────────────────────────────
-f_tc(v) =>
-    v == 1 ? color.new(#00C853, 10) : v == -1 ? color.new(#FF1744, 10) : color.new(#555555, 10)
+tz_hour = hour(time, "GMT+3")
+string sess_name = "OFF-MARKET"
+string sess_time = "No Session Active"
 
-f_tt(v) =>
-    v == 1 ? "Bullish" : v == -1 ? "Bearish" : "Neutral"
+if tz_hour >= 15 or tz_hour < 0
+    sess_name := "NEW YORK"
+    sess_time := "15:00 - 00:00 (UTC+3)"
+else if tz_hour >= 10 and tz_hour < 15
+    sess_name := "LONDON"
+    sess_time := "10:00 - 19:00 (UTC+3)"
+else if tz_hour >= 3 and tz_hour < 10
+    sess_name := "TOKYO"
+    sess_time := "03:00 - 12:00 (UTC+3)"
+else
+    sess_name := "SYDNEY"
+    sess_time := "00:00 - 09:00 (UTC+3)"
 
+// ───────────────────────────────────────────────────────────────
+// COMMAND CENTER DASHBOARD TABLE (Expanded Matrix)
+// ───────────────────────────────────────────────────────────────
 cur_trend_val = bull_trend ? 1 : bear_trend ? -1 : 0
 pos_text      = trade_dir ==  1 ? "Buy"  : trade_dir == -1 ? "Sell" : "None"
 pos_color     = trade_dir ==  1 ? color.new(#00C853, 10) : trade_dir == -1 ? color.new(#FF1744, 10) : color.new(#555555, 10)
@@ -241,35 +250,45 @@ tbl_position = switch tbl_pos
     "Top Right"    => position.top_right
     => position.top_left
 
-var table tbl = table.new(tbl_position, 2, 12, border_color=color.new(#444444, 20), border_width=1, frame_color=color.new(#222222, 0), frame_width=2)
+// Matrix increased to 14 rows to fit the new session fields on top
+var table tbl = table.new(tbl_position, 2, 14, border_color=color.new(#444444, 20), border_width=1, frame_color=color.new(#222222, 0), frame_width=2)
 HDR_BG = color.new(#1A1A2E, 10)
 ROW_BG = color.new(#111122, 20)
 
 if show_table
-    table.cell(tbl, 0, 0,  "Current Position", bgcolor=HDR_BG, text_color=#CCCCCC, text_size=size.small, text_halign=text.align_left)
-    table.cell(tbl, 1, 0,  pos_text, bgcolor=pos_color, text_color=color.white, text_size=size.small, text_halign=text.align_center)
-    table.cell(tbl, 0, 1,  "Current Trend", bgcolor=HDR_BG, text_color=#CCCCCC, text_size=size.small, text_halign=text.align_left)
-    table.cell(tbl, 1, 1,  f_tt(cur_trend_val), bgcolor=f_tc(cur_trend_val), text_color=color.white, text_size=size.small, text_halign=text.align_center)
-    table.cell(tbl, 0, 2,  "1 min",  bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
-    table.cell(tbl, 1, 2,  f_tt(t_1m),  bgcolor=f_tc(t_1m),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
-    table.cell(tbl, 0, 3,  "3 min",  bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
-    table.cell(tbl, 1, 3,  f_tt(t_3m),  bgcolor=f_tc(t_3m),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
-    table.cell(tbl, 0, 4,  "5 min",  bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
-    table.cell(tbl, 1, 4,  f_tt(t_5m),  bgcolor=f_tc(t_5m),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
-    table.cell(tbl, 0, 5,  "15 min", bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
-    table.cell(tbl, 1, 5,  f_tt(t_15m), bgcolor=f_tc(t_15m), text_color=color.white, text_size=size.small, text_halign=text.align_center)
-    table.cell(tbl, 0, 6,  "30 min", bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
-    table.cell(tbl, 1, 6,  f_tt(t_30m), bgcolor=f_tc(t_30m), text_color=color.white, text_size=size.small, text_halign=text.align_center)
-    table.cell(tbl, 0, 7,  "1H",     bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
-    table.cell(tbl, 1, 7,  f_tt(t_1h),  bgcolor=f_tc(t_1h),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
-    table.cell(tbl, 0, 8,  "2H",     bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
-    table.cell(tbl, 1, 8,  f_tt(t_2h),  bgcolor=f_tc(t_2h),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
-    table.cell(tbl, 0, 9,  "4H",     bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
-    table.cell(tbl, 1, 9,  f_tt(t_4h),  bgcolor=f_tc(t_4h),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
-    table.cell(tbl, 0, 10, "8H",     bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
-    table.cell(tbl, 1, 10, f_tt(t_8h),  bgcolor=f_tc(t_8h),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
-    table.cell(tbl, 0, 11, "Daily",  bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
-    table.cell(tbl, 1, 11, f_tt(t_1d),  bgcolor=f_tc(t_1d),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
+    // Row 0: Active Session Name
+    table.cell(tbl, 0, 0,  "Session", bgcolor=HDR_BG, text_color=#CCCCCC, text_size=size.small, text_halign=text.align_left)
+    table.cell(tbl, 1, 0,  sess_name, bgcolor=ROW_BG, text_color=color.orange, text_size=size.small, text_halign=text.align_center)
+    
+    // Row 1: Session Operating Hours
+    table.cell(tbl, 0, 1,  "Hours", bgcolor=HDR_BG, text_color=#CCCCCC, text_size=size.small, text_halign=text.align_left)
+    table.cell(tbl, 1, 1,  sess_time, bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_center)
+
+    // Rows 2-13: Structural Data & Timeframe Trackers
+    table.cell(tbl, 0, 2,  "Current Position", bgcolor=HDR_BG, text_color=#CCCCCC, text_size=size.small, text_halign=text.align_left)
+    table.cell(tbl, 1, 2,  pos_text, bgcolor=pos_color, text_color=color.white, text_size=size.small, text_halign=text.align_center)
+    table.cell(tbl, 0, 3,  "Current Trend", bgcolor=HDR_BG, text_color=#CCCCCC, text_size=size.small, text_halign=text.align_left)
+    table.cell(tbl, 1, 3,  f_tt(cur_trend_val), bgcolor=f_tc(cur_trend_val), text_color=color.white, text_size=size.small, text_halign=text.align_center)
+    table.cell(tbl, 0, 4,  "1 min",  bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
+    table.cell(tbl, 1, 4,  f_tt(t_1m),  bgcolor=f_tc(t_1m),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
+    table.cell(tbl, 0, 5,  "3 min",  bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
+    table.cell(tbl, 1, 5,  f_tt(t_3m),  bgcolor=f_tc(t_3m),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
+    table.cell(tbl, 0, 6,  "5 min",  bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
+    table.cell(tbl, 1, 6,  f_tt(t_5m),  bgcolor=f_tc(t_5m),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
+    table.cell(tbl, 0, 7,  "15 min", bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
+    table.cell(tbl, 1, 7,  f_tt(t_15m), bgcolor=f_tc(t_15m), text_color=color.white, text_size=size.small, text_halign=text.align_center)
+    table.cell(tbl, 0, 8,  "30 min", bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
+    table.cell(tbl, 1, 8,  f_tt(t_30m), bgcolor=f_tc(t_30m), text_color=color.white, text_size=size.small, text_halign=text.align_center)
+    table.cell(tbl, 0, 9,  "1H",     bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
+    table.cell(tbl, 1, 9,  f_tt(t_1h),  bgcolor=f_tc(t_1h),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
+    table.cell(tbl, 0, 10, "2H",     bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
+    table.cell(tbl, 1, 10, f_tt(t_2h),  bgcolor=f_tc(t_2h),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
+    table.cell(tbl, 0, 11, "4H",     bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
+    table.cell(tbl, 1, 11, f_tt(t_4h),  bgcolor=f_tc(t_4h),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
+    table.cell(tbl, 0, 12, "8H",     bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
+    table.cell(tbl, 1, 12, f_tt(t_8h),  bgcolor=f_tc(t_8h),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
+    table.cell(tbl, 0, 13, "Daily",  bgcolor=ROW_BG, text_color=#AAAAAA, text_size=size.small, text_halign=text.align_left)
+    table.cell(tbl, 1, 13, f_tt(t_1d),  bgcolor=f_tc(t_1d),  text_color=color.white, text_size=size.small, text_halign=text.align_center)
 
 // ───────────────────────────────────────────────────────────────
 // ALERTS
