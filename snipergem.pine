@@ -1,9 +1,9 @@
 // ═══════════════════════════════════════════════════════════════
-// Smart Trade System v1.0
+// Smart Trade System v2.1
 // Multi-Timeframe Trend Dashboard + Accurate Entry/SL/TP Levels
 // ═══════════════════════════════════════════════════════════════
 //@version=6
-indicator("Sniper Trade Dashboard", overlay=true, max_lines_count=50, max_labels_count=200, max_boxes_count=10)
+indicator("Sniper Trade Dashboard", overlay=true, max_lines_count=50, max_labels_count=200, max_boxes_count=20)
 
 // ───────────────────────────────────────────────────────────────
 // INPUTS
@@ -17,6 +17,10 @@ rsi_ob        = input.float(65, "RSI Overbought",    group=grp_sig, minval=50, m
 rsi_os        = input.float(35, "RSI Oversold",      group=grp_sig, minval=0,  maxval=50)
 vol_filter    = input.bool(true, "Volume Filter",    group=grp_sig)
 
+// NEW: HTF Trend Filter to eliminate 1-minute false triggers
+filter_htf   = input.bool(true, "Enable HTF Trend Filter", group=grp_sig)
+filter_tf    = input.timeframe("5", "Filter Timeframe", group=grp_sig)
+
 grp_risk = "══ Risk Management ══"
 atr_len   = input.int(14,    "ATR Length",         group=grp_risk, minval=1)
 sl_mult   = input.float(1.5, "SL ATR Multiplier",  group=grp_risk, step=0.1, minval=0.5)
@@ -27,10 +31,10 @@ use_swing = input.bool(true,  "Use Swing SL (vs ATR)", group=grp_risk)
 swing_lb  = input.int(5,     "Swing Lookback",     group=grp_risk, minval=3, maxval=20)
 
 grp_disp = "══ Display ══"
-show_emas   = input.bool(true,  "Show EMAs",              group=grp_disp)
+show_emas   = input.bool(false, "Show EMAs",              group=grp_disp)
 show_table  = input.bool(true,  "Show MTF Dashboard",     group=grp_disp)
 show_levels = input.bool(true,  "Show SL / TP Levels",    group=grp_disp)
-show_bg     = input.bool(true,  "Show Trade Zone Box",    group=grp_disp)
+show_bg     = input.bool(true,  "Show Trade Zone Boxes",   group=grp_disp)
 tbl_pos     = input.string("Bottom Right", "Table Position",
                options=["Bottom Right","Bottom Left","Top Right","Top Left"], group=grp_disp)
 
@@ -59,21 +63,53 @@ if not na(pl)
 // Trend conditions
 bull_trend = ema_f > ema_s and ema_s > ema_t and close > ema_t
 bear_trend = ema_f < ema_s and ema_s < ema_t and close < ema_t
-neut_trend = not bull_trend and not bear_trend
 
 // Volume confirmation
 vol_ok = not vol_filter or volume > vol_ma
 
 // ───────────────────────────────────────────────────────────────
-// SIGNAL LOGIC (EMA cross + RSI + Trend filter + Volume)
+// MULTI-TIMEFRAME TREND FUNCTIONS
+// ───────────────────────────────────────────────────────────────
+get_mtf_ema_f  (tf) => request.security(syminfo.tickerid, tf, ta.ema(close, ema_fast_len),  lookahead=barmerge.lookahead_off)
+get_mtf_ema_s  (tf) => request.security(syminfo.tickerid, tf, ta.ema(close, ema_slow_len),  lookahead=barmerge.lookahead_off)
+get_mtf_ema_t  (tf) => request.security(syminfo.tickerid, tf, ta.ema(close, ema_trend_len), lookahead=barmerge.lookahead_off)
+get_mtf_close  (tf) => request.security(syminfo.tickerid, tf, close,                        lookahead=barmerge.lookahead_off)
+
+mtf_dir(tf) =>
+    ef = get_mtf_ema_f(tf)
+    es = get_mtf_ema_s(tf)
+    et = get_mtf_ema_t(tf)
+    c  = get_mtf_close(tf)
+    ef > es and c > et ? 1 : ef < es and c < et ? -1 : 0
+
+t_1m  = mtf_dir("1")
+t_3m  = mtf_dir("3")
+t_5m  = mtf_dir("5")
+t_15m = mtf_dir("15")
+t_30m = mtf_dir("30")
+t_1h  = mtf_dir("60")
+t_2h  = mtf_dir("120")
+t_4h  = mtf_dir("240")
+t_8h  = mtf_dir("480")
+t_1d  = mtf_dir("1D")
+
+// Get specific filter timeframe trend
+htf_trend_val = mtf_dir(filter_tf)
+
+// ───────────────────────────────────────────────────────────────
+// SIGNAL LOGIC WITH NEW FILTER
 // ───────────────────────────────────────────────────────────────
 buy_raw  = ta.crossover(ema_f, ema_s)  and close > ema_t and rsi < rsi_ob and vol_ok
 sell_raw = ta.crossunder(ema_f, ema_s) and close < ema_t and rsi > rsi_os  and vol_ok
 
+// Filter out false signals if filter is active
+buy_filtered  = buy_raw  and (not filter_htf or htf_trend_val == 1)
+sell_filtered = sell_raw and (not filter_htf or htf_trend_val == -1)
+
 // Prevent back-to-back same-direction signals
 var int last_dir = 0
-buy_signal  = buy_raw  and last_dir != 1
-sell_signal = sell_raw and last_dir != -1
+buy_signal  = buy_filtered  and last_dir != 1
+sell_signal = sell_filtered and last_dir != -1
 
 if buy_signal
     last_dir := 1
@@ -113,37 +149,21 @@ if sell_signal
     trade_dir := -1
 
 // ───────────────────────────────────────────────────────────────
-// MULTI-TIMEFRAME TREND (10 timeframes)
-// ───────────────────────────────────────────────────────────────
-get_mtf_ema_f  (tf) => request.security(syminfo.tickerid, tf, ta.ema(close, ema_fast_len),  lookahead=barmerge.lookahead_off)
-get_mtf_ema_s  (tf) => request.security(syminfo.tickerid, tf, ta.ema(close, ema_slow_len),  lookahead=barmerge.lookahead_off)
-get_mtf_ema_t  (tf) => request.security(syminfo.tickerid, tf, ta.ema(close, ema_trend_len), lookahead=barmerge.lookahead_off)
-get_mtf_close  (tf) => request.security(syminfo.tickerid, tf, close,                        lookahead=barmerge.lookahead_off)
-
-mtf_dir(tf) =>
-    ef = get_mtf_ema_f(tf)
-    es = get_mtf_ema_s(tf)
-    et = get_mtf_ema_t(tf)
-    c  = get_mtf_close(tf)
-    ef > es and c > et ? 1 : ef < es and c < et ? -1 : 0
-
-t_1m  = mtf_dir("1")
-t_3m  = mtf_dir("3")
-t_5m  = mtf_dir("5")
-t_15m = mtf_dir("15")
-t_30m = mtf_dir("30")
-t_1h  = mtf_dir("60")
-t_2h  = mtf_dir("120")
-t_4h  = mtf_dir("240")
-t_8h  = mtf_dir("480")
-t_1d  = mtf_dir("1D")
-
-// ───────────────────────────────────────────────────────────────
 // PLOTS — EMAs
 // ───────────────────────────────────────────────────────────────
 plot(show_emas ? ema_f : na, "Fast EMA",  color=color.new(#00BFFF, 30), linewidth=1)
 plot(show_emas ? ema_s : na, "Slow EMA",  color=color.new(#FFA500, 30), linewidth=1)
 plot(show_emas ? ema_t : na, "Trend EMA", color=color.new(#CC44FF, 20), linewidth=2)
+
+// NEW: Background Scaling Plots to force the Y-axis to expand and show the TPs
+var float scale_sl = na
+var float scale_tp = na
+if buy_signal or sell_signal
+    scale_sl := sl_px
+    scale_tp := tp1_px
+
+plot(show_levels ? scale_sl : na, "Y-Axis SL Anchor", color=color.new(color.red, 100))
+plot(show_levels ? scale_tp : na, "Y-Axis TP Anchor", color=color.new(color.green, 100))
 
 // ───────────────────────────────────────────────────────────────
 // BUY / SELL LABELS
@@ -181,7 +201,8 @@ var label lb_en  = na
 var label lb_tp1 = na
 var label lb_tp2 = na
 var label lb_tp3 = na
-var box   trade_box = na
+var box   risk_box = na
+var box   profit_box = na
 
 if (buy_signal or sell_signal) and show_levels
     // Clean up previous drawings
@@ -195,9 +216,10 @@ if (buy_signal or sell_signal) and show_levels
     label.delete(lb_tp1)
     label.delete(lb_tp2)
     label.delete(lb_tp3)
-    box.delete(trade_box)
+    box.delete(risk_box)
+    box.delete(profit_box)
 
-    // Draw new level lines (Fixed: using bar_index + 1 to enable proper line extension)
+    // Draw new level lines
     l_sl  := line.new(bar_index, sl_px,    bar_index + 1, sl_px,    extend=extend.right, color=#FF3333, width=2,  style=line.style_solid)
     l_en  := line.new(bar_index, entry_px, bar_index + 1, entry_px, extend=extend.right, color=#AAAAAA, width=2,  style=line.style_dashed)
     l_tp1 := line.new(bar_index, tp1_px,   bar_index + 1, tp1_px,   extend=extend.right, color=#00C853, width=1,  style=line.style_solid)
@@ -211,13 +233,21 @@ if (buy_signal or sell_signal) and show_levels
     lb_tp2 := label.new(bar_index + 2, tp2_px,   "TP2 ("   + str.tostring(tp2_px,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
     lb_tp3 := label.new(bar_index + 2, tp3_px,   "TP3 ("   + str.tostring(tp3_px,   format.mintick) + ")", style=label.style_label_left, color=#00C853, textcolor=color.white, size=size.small)
 
-    // Trade zone box (Fixed: removed extend.right to keep chart auto-scaling clean)
+    // Trade zone boxes
     if show_bg
         box_top = buy_signal  ? entry_px : sl_px
         box_bot = sell_signal ? entry_px : sl_px
-        trade_box := box.new(bar_index, box_top, bar_index + 30, box_bot,
-                              bgcolor  = color.new(color.red, 85),
-                              border_color = color.new(color.red, 70),
+        risk_box := box.new(bar_index, box_top, bar_index + 30, box_bot,
+                              bgcolor  = color.new(color.red, 88),
+                              border_color = color.new(color.red, 75),
+                              border_width = 1)
+                              
+        // NEW: Visible Green Profit Target Box (Entry to TP1)
+        tp_box_top = buy_signal  ? tp1_px : entry_px
+        tp_box_bot = sell_signal ? tp1_px : entry_px
+        profit_box := box.new(bar_index, tp_box_top, bar_index + 30, tp_box_bot,
+                              bgcolor  = color.new(color.green, 88),
+                              border_color = color.new(color.green, 75),
                               border_width = 1)
 
 // ───────────────────────────────────────────────────────────────
@@ -233,7 +263,6 @@ cur_trend_val = bull_trend ? 1 : bear_trend ? -1 : 0
 pos_text      = trade_dir ==  1 ? "Buy"  : trade_dir == -1 ? "Sell" : "None"
 pos_color     = trade_dir ==  1 ? color.new(#00C853, 10) : trade_dir == -1 ? color.new(#FF1744, 10) : color.new(#555555, 10)
 
-// Fixed: Replaced nested ternary layout with v6 compliant switch assignment
 tbl_position = switch tbl_pos
     "Bottom Right" => position.bottom_right
     "Bottom Left"  => position.bottom_left
